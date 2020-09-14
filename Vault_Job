@@ -1,0 +1,85 @@
+#!/bin/bash
+
+echo $WORKSPACE
+cd $WORKSPACE
+
+#tempararly download vault binary using curl
+###
+VAULT_URL="https:"
+SERVICEID=""
+SERVICEID_PWD="" 
+VAULTTOKEN=""
+VAULT_DOMAIN="fg"
+VAULTSECRETSPATH="appcode/AP30/"
+ENVS=""
+ENVIRON=""
+
+
+FindEnvs() {
+	if [ -d scripts ]; then
+		echo -e "\n\t listing environments in scripts \n"
+		ENVS=(`ls -d scripts/*`)
+}
+
+GetVaultToken() {
+	IFS=''
+	PAYLOAD=$(echo "{ \"password\": \"pwd\" }" | sed -e 's?PWD?'$SERVICEID_PWD'?g');
+	curl -v -s -k -i $VAULT_URL/v1/auth/$VAULT_DOMAIN/login/$SERVICEID -d $PAYLOAD >v.json
+	VAULTTOKEN=`grep -Po '"client_token": *\K"[^"]*"' v.json | sed 's/\"\//g'`
+}
+
+ReadVaultData() {
+	export VAULT_ADDR="$VAULT_URL"
+	export VAULT_SKIP_VERIFY=true
+	export VAULT_TOKEN="#VAULTTOKEN"
+	./vault read -filed=data -format="json" "$VAULTSECRETSPATH"/"$ENVIRON"/DC_loader/"$ENVIRON"_config 2>&1 >/tmp/"$ENVIRON"_config
+}
+
+ProcessData() {
+	#Convert and update the passwords
+	sed 's/:/=/g; s/"//g; s/^[[:space]]*//; s/[ \t]*$//; /{/d; /}/d;' /tmp/"$ENVIRON"_config | cut -d',' -f1| tr -d ' ' >/tmp/"$ENVIRON"_data.config
+	while IFS= read -r line; do
+	    if [[ $line =~ syb ]]; then
+	        echo "$line" >> scripts/"$ENVIRON"/bcp_login.cfg
+	    elif [[ $line =~ mem ]]; then
+	    	echo "$line" >> scripts/"$ENVIRON"/bcp_login.cfg
+	    else
+	        echo "$line" 
+	    fi
+	done </tmp/"$ENVIRON"_data.config
+}
+
+#Discover environments
+VaultRead() {
+	if [ "$PWD" == "$WORKSPACE" ]; then
+		echo -e "\n\t listing environments in scripts \n"
+		FindEnvs
+		for d in "${ENVS[@]}"; do
+			if [[ $d =~ DEV ]]; then
+				SERVICEID="DEVW1232"
+				SERVICEID_PWD="$DEV_PASSWORD"
+				ENVIRON="$d"
+				GetVaultToken
+				ReadVaultData
+				ProcessData
+			elif [[ $d =~ QA ]]; then
+				SERVICEID="DAPW1232"
+				SERVICEID_PWD="$SAI_PASSWORD"
+				ENVIRON="$d"
+				GetVaultToken
+				ReadVaultData
+				ProcessData
+			elif [[ $d =~ UAT ]]; then
+				SERVICEID="DAPW1232"
+				SERVICEID_PWD="$SAI_PASSWORD"
+				ENVIRON="$d"
+				GetVaultToken
+				ReadVaultData
+				ProcessData
+			else
+				echo "SKIPPING"
+			fi 
+		done
+    fi
+}
+VaultRead
